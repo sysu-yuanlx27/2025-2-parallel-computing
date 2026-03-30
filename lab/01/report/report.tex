@@ -1,0 +1,120 @@
+\documentclass[12pt,a4paper]{ctexart}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{booktabs}
+\usepackage{siunitx}
+\usepackage{hyperref}
+
+\title{并行程序设计与算法实验\\实验 0：环境设置与串行矩阵乘法}
+\author{姓名：元朗曦 \quad 学号：23336294}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\section{实验零报告}
+
+\subsection{实验目的}
+本实验旨在完成串行矩阵乘法程序的实现与优化对比，建立后续并行优化实验的性能基线。具体目标如下：
+\begin{enumerate}
+  \item 熟悉矩阵乘法计算模型与时间复杂度特性。
+  \item 分别使用 Python 与 C/C++ 实现串行矩阵乘法。
+  \item 从循环顺序、编译优化、循环展开等角度进行性能改进。
+  \item 通过运行时间、加速比、GFLOPS 与峰值性能百分比评估优化效果。
+\end{enumerate}
+
+\subsection{实验原理}
+设矩阵 $A \in \mathbb{R}^{m\times n}$，$B \in \mathbb{R}^{n\times k}$，则乘积矩阵 $C \in \mathbb{R}^{m\times k}$ 的元素定义为
+\begin{equation}
+C_{i,j}=\sum_{p=1}^{n}A_{i,p}B_{p,j}.
+\end{equation}
+
+朴素三重循环算法时间复杂度为 $O(mnk)$，浮点运算量近似为
+\begin{equation}
+\text{FLOPs}=2mnk.
+\end{equation}
+
+对应浮点性能（GFLOPS）计算公式为
+\begin{equation}
+\text{GFLOPS}=\frac{2mnk}{t\times 10^9},
+\end{equation}
+其中 $t$ 为矩阵乘法耗时。若设备峰值性能为 $P_{\max}$（GFLOPS），则峰值性能百分比为
+\begin{equation}
+\text{Peak\%}=\frac{\text{GFLOPS}}{P_{\max}}\times 100\%.
+\end{equation}
+
+优化原理说明：
+\begin{enumerate}
+  \item 调整循环顺序（如 $i$-$p$-$j$）可提升缓存局部性，减少访存开销。
+  \item 编译优化（例如 \texttt{-O3} 与 \texttt{-march=native}）可启用向量化与指令级优化。
+  \item 循环展开可减少分支与循环控制开销，提高流水线利用率。
+\end{enumerate}
+
+\subsection{实验内容}
+\textbf{实现说明：}
+\begin{enumerate}
+  \item 版本 1：Python 朴素实现。
+  \item 版本 2：C/C++ 朴素实现（\texttt{O0}）。
+  \item 版本 3：C/C++ 调整循环顺序（\texttt{O0 + reorder}）。
+  \item 版本 4：C/C++ 编译优化（\texttt{O3 + reorder}）。
+  \item 版本 5：C/C++ 循环展开（\texttt{O3 + unroll}）。
+\end{enumerate}
+
+\textbf{具体运行测试方法：}
+\begin{enumerate}
+  \item 进入实验目录：\texttt{cd lab/01/src}。
+  \item 编译 C/C++ 程序：\texttt{make clean \&\& make all}。
+  \item 执行自动测试并生成表格：
+\begin{verbatim}
+python3 benchmark.py --m 512 --n 512 --k 512 --peak-gflops 80 --save-md result.md
+\end{verbatim}
+  \item 若需查看单个版本原始输出，可分别执行：
+\begin{verbatim}
+python3 matmul.py 512 512 512
+./matmul_O0 512 512 512 naive
+./matmul_O0 512 512 512 reorder
+./matmul_O3 512 512 512 reorder
+./matmul_O3 512 512 512 unroll
+\end{verbatim}
+  \item 为降低偶然误差，每个版本至少重复运行 3 次，取平均时间作为表格中的最终结果。
+\end{enumerate}
+
+\textbf{测试条件：}
+矩阵规模为 $m=n=k=512$，峰值性能设定为 $80.000$ GFLOPS。
+
+\begin{table}[htbp]
+\centering
+\caption{不同版本串行矩阵乘法性能对比}
+\begin{tabular}{lrrrrr}
+\toprule
+版本 & 时间(sec) & 相对加速比 & 绝对加速比 & GFLOPS & 峰值性能(\%) \\
+\midrule
+1 Python                & 11.797337 & 1.000  & 1.000   & 0.023  & 0.029  \\
+2 C/C++                 & 1.163168  & 10.142 & 10.142  & 0.231  & 0.289  \\
+3 调整循环顺序          & 0.694146  & 1.676  & 16.995  & 0.387  & 0.484  \\
+4 编译优化              & 0.026696  & 26.002 & 441.914 & 10.055 & 12.569 \\
+5 循环展开              & 0.026168  & 1.020  & 450.831 & 10.258 & 12.822 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+结果分析如下：
+\begin{enumerate}
+  \item 与 Python 相比，C/C++ 版本显著降低解释器开销，性能提升明显。
+  \item 调整循环顺序后，访存局部性改善，带来稳定加速。
+  \item 编译优化带来最显著增益，说明向量化与指令优化对计算密集型任务效果明显。
+  \item 在编译优化基础上进一步循环展开，获得小幅继续提升，接近当前串行实现上限。
+\end{enumerate}
+
+\subsection{实验总结}
+本实验完成了串行矩阵乘法从基线实现到多种优化策略的完整对比。实验结果表明：
+\begin{enumerate}
+  \item 性能优化应优先关注数据访问模式与编译器优化能力。
+  \item 单纯算法正确性并不足以获得高性能，工程实现细节对最终速度影响很大。
+  \item 在当前测试规模下，优化后 C/C++ 版本相对 Python 实现获得数量级提升。
+\end{enumerate}
+
+后续可进一步开展的工作包括：分块（blocking）优化、SIMD 显式向量化以及并行化（OpenMP/MPI）实现，以继续提升性能并提高峰值利用率。
+
+\end{document}
