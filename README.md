@@ -15,3 +15,13 @@ sudo pacman -S openmpi intel-oneapi-mkl
 ```sh
 sudo pacman -S texlive texlive-langchinese
 ```
+
+# 一键打包
+
+以实验一为例，在 Shell 中执行：
+
+```sh
+git archive -o 01.zip HEAD lab/01
+```
+
+便会将最新一次 Commit 后 `lab/01` 文件夹中不在 `.gitignore` 中的所有文件打包成一个 `01.zip` 文件．
