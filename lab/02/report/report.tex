@@ -1,0 +1,191 @@
+\documentclass[12pt,a4paper]{ctexart}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{listings}
+\usepackage[dvipsnames]{xcolor}
+\usepackage{hyperref}
+
+\definecolor{codebg}{HTML}{F7F8FA}
+\definecolor{codeframe}{HTML}{D9DEE7}
+\definecolor{codekeyword}{HTML}{0066CC}
+\definecolor{codestring}{HTML}{A31515}
+\definecolor{codecomment}{HTML}{008000}
+
+\lstdefinestyle{reportcode}{
+  backgroundcolor=\color{codebg},
+  basicstyle=\ttfamily\small,
+  frame=single,
+  rulecolor=\color{codeframe},
+  frameround=ffff,
+  columns=fullflexible,
+  breaklines=true,
+  breakatwhitespace=true,
+  tabsize=4,
+  showstringspaces=false,
+  keepspaces=true,
+  keywordstyle=\color{codekeyword}\bfseries,
+  commentstyle=\color{codecomment},
+  stringstyle=\color{codestring},
+  numbers=left,
+  numberstyle=\tiny\color{gray},
+  numbersep=8pt,
+  xleftmargin=1.8em,
+  framexleftmargin=1.2em,
+  aboveskip=0.8em,
+  belowskip=0.8em
+}
+
+\lstset{style=reportcode}
+\hypersetup{
+  colorlinks=true,
+  linkcolor=MidnightBlue,
+  urlcolor=RoyalBlue,
+  citecolor=MidnightBlue
+}
+
+\title{并行程序设计与算法实验\\实验二：基于 MPI 的并行矩阵乘法（进阶）}
+\author{姓名：元朗曦 \quad 学号：23336294}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\section{实验目的}
+本实验在实验一基础上，进一步改进 MPI 并行矩阵乘法实现，并比较不同进程通信方式对性能与扩展性的影响。通过本实验希望达到以下目标：
+\begin{enumerate}[itemsep=0.3em]
+  \item 掌握 MPI 集合通信在并行矩阵乘法中的使用方法。
+  \item 学习使用 \texttt{MPI\_Type\_create\_struct} 对进程内多个控制变量进行聚合通信。
+  \item 对比点对点通信与集合通信在不同矩阵规模和进程数下的性能差异。
+  \item 分析并行矩阵乘法的可扩展性，并理解通信开销、负载划分与并行效率之间的关系。
+\end{enumerate}
+
+\section{实验原理}
+设矩阵 $A \in \mathbb{R}^{m\times n}$，$B \in \mathbb{R}^{n\times k}$，则结果矩阵 $C \in \mathbb{R}^{m\times k}$ 满足
+\begin{equation}
+C_{i,j}=\sum_{p=1}^{n}A_{i,p}B_{p,j}.
+\end{equation}
+
+其总浮点运算量近似为
+\begin{equation}
+\mathrm{FLOPs}=2mnk,
+\end{equation}
+若并行执行时间为 $t$，则吞吐率可写为
+\begin{equation}
+\mathrm{GFLOPS}=\frac{2mnk}{t\times 10^9}.
+\end{equation}
+
+本实验采用“按行划分矩阵 $A$”的并行策略：
+\begin{enumerate}[itemsep=0.3em]
+  \item 0 号进程生成完整矩阵 $A$ 与 $B$。
+  \item 根据进程数将 $A$ 的行块划分给各进程，每个进程计算本地子块结果 $C_{local}$。
+  \item 汇总所有局部结果形成完整矩阵 $C$。
+\end{enumerate}
+
+通信层面实现两种方案：
+\begin{enumerate}[itemsep=0.3em]
+  \item \textbf{点对点通信（P2P）}：使用 \texttt{MPI\_Send/MPI\_Recv} 手动分发数据并回收结果。
+  \item \textbf{集合通信（Collective）}：使用 \texttt{MPI\_Bcast} 广播 $B$，\texttt{MPI\_Scatterv} 分发 $A$ 子块，\texttt{MPI\_Gatherv} 回收 $C$ 子块。
+\end{enumerate}
+
+此外，程序将参数 $m,n,k$ 以及打印/通信模式封装到结构体中，并用 \texttt{MPI\_Type\_create\_struct} 创建自定义 MPI 派生类型，通过 \texttt{MPI\_Bcast} 一次同步，减少重复参数广播逻辑并提高代码可维护性。
+
+\section{实验内容}
+\subsection*{1. 程序实现}
+本实验代码位于 \texttt{lab/02/src}，核心文件为 \texttt{matmul.cpp}。程序支持如下输入：
+\begin{itemize}[itemsep=0.3em]
+  \item 矩阵规模参数：$m,n,k$，范围均为 $[128,2048]$；
+  \item 通信模式参数：\texttt{--comm p2p} 或 \texttt{--comm collective}；
+  \item 输出控制参数：\texttt{--full-print} 或 \texttt{--no-print}。
+\end{itemize}
+
+执行流程如下：
+\begin{enumerate}[itemsep=0.3em]
+  \item 0 号进程解析命令行，构建配置结构体，并通过 \texttt{MPI\_Type\_create\_struct + MPI\_Bcast} 同步配置。
+  \item 依据 $m$ 与进程数进行不均匀按行划分，得到每个进程负责的行数与偏移量。
+  \item 按通信模式执行并行矩阵乘法。
+  \item 使用 \texttt{MPI\_Reduce(MPI\_MAX)} 统计全局时间，输出 \texttt{Time (sec)} 与 \texttt{GFLOPS}。
+\end{enumerate}
+
+\subsection*{2. 编译与运行方法}
+\begin{lstlisting}[language=bash]
+cd lab/02
+make clean && make all
+
+# 集合通信版本
+mpirun --oversubscribe -np 4 ./build/matmul_mpi_v2 512 512 512 --comm collective --no-print
+
+# 点对点通信版本
+mpirun --oversubscribe -np 4 ./build/matmul_mpi_v2 512 512 512 --comm p2p --no-print
+
+# 自动化测试（可按需调整规模和进程数）
+python3 benchmark.py \
+  --sizes 128,256,512,1024,2048 \
+  --processes 1,2,4,8,16 \
+  --comm p2p,collective \
+  --save-md result.md
+\end{lstlisting}
+
+\subsection*{3. 实验结果记录表}
+根据实验要求，需要记录不同矩阵规模与不同进程数下的时间开销。可分别填写两种通信模式的表格。
+
+\textbf{(a) 点对点通信 P2P}
+\begin{table}[htbp]
+  \centering
+  \renewcommand{\arraystretch}{1.2}
+  \begin{tabular}{c|c|c|c|c|c}
+    \toprule
+    矩阵规模/进程数 & 1 & 2 & 4 & 8 & 16 \\
+    \midrule
+    128  & 0.000212 & 0.000199 & 0.000216 & 0.000427 & 0.004401 \\
+    256  & 0.002234 & 0.001366 & 0.000877 & 0.001259 & 0.001889 \\
+    512  & 0.031308 & 0.013165 & 0.007897 & 0.015246 & 0.008884 \\
+    1024 & 0.341987 & 0.142032 & 0.169334 & 0.213951 & 0.329076 \\
+    2048 & 7.021127 & 4.145056 & 3.067543 & 2.454947 & 2.153616 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\textbf{(b) 集合通信 Collective}
+\begin{table}[htbp]
+  \centering
+  \renewcommand{\arraystretch}{1.2}
+  \begin{tabular}{c|c|c|c|c|c}
+    \toprule
+    矩阵规模/进程数 & 1 & 2 & 4 & 8 & 16 \\
+    \midrule
+    128  & 0.003575 & 0.000266 & 0.000222 & 0.000520 & 0.000506 \\
+    256  & 0.004410 & 0.002091 & 0.001480 & 0.001128 & 0.002389 \\
+    512  & 0.032145 & 0.012430 & 0.009520 & 0.007020 & 0.015885 \\
+    1024 & 0.677618 & 0.124078 & 0.214538 & 0.134274 & 0.249981 \\
+    2048 & 4.525146 & 3.575181 & 2.113991 & 1.790467 & 1.686653 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+从实测结果看，集合通信在中大规模矩阵下通常具有更稳定的扩展性，而点对点通信在小规模场景下有时会因为实现开销较低而表现接近甚至更快；当进程数继续增加时，通信与同步开销会逐步抵消计算加速带来的收益。
+
+\subsection*{4. 结果分析}
+在报告中建议重点分析以下内容：
+\begin{enumerate}[itemsep=0.3em]
+  \item 小规模矩阵时通信开销占比较高，不同通信方式的差异可能受进程启动和同步开销影响。
+  \item 中大规模矩阵时计算占比提升，更能反映通信机制的效率差异。
+  \item 随进程数增加，理论上计算时间下降，但当通信和同步开销成为瓶颈后，扩展性会减弱。
+  \item 若集合通信实现使用了优化的底层通信算法，通常在中大规模场景下表现更稳定。
+\end{enumerate}
+
+\section{实验总结}
+本实验完成了 MPI 并行矩阵乘法的进阶实现，并围绕“点对点通信 vs 集合通信”进行了方法级对比。通过实验可得：
+\begin{enumerate}[itemsep=0.3em]
+  \item 集合通信能够简化代码逻辑，降低手工管理消息的复杂度。
+  \item 使用 \texttt{MPI\_Type\_create\_struct} 聚合进程内变量通信，可以提升程序结构清晰度与可扩展性。
+  \item 并行性能不仅由计算量决定，还显著受通信模式、数据划分和进程规模影响。
+  \item 在后续优化中，可继续尝试二维块划分、通信与计算重叠以及更细粒度负载均衡，以进一步提升扩展效率。
+\end{enumerate}
+
+总体而言，本实验加深了我对 MPI 通信机制和并行性能分析方法的理解，为后续更高性能并行算法设计奠定了基础。
+
+\end{document}
