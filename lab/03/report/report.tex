@@ -1,0 +1,179 @@
+\documentclass[12pt,a4paper]{ctexart}
+
+\usepackage[a4paper,margin=2.5cm]{geometry}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{hyperref}
+
+\title{并行程序设计与算法实验三报告\\Pthreads 并行矩阵乘法与数组求和}
+\author{姓名：元朗曦\quad 学号：23336294}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\section{实验目的}
+\begin{enumerate}
+    \item 掌握 Pthreads 多线程编程的基本方法，理解线程创建、任务划分与结果汇总流程。
+    \item 实现并行矩阵乘法与并行数组求和，熟悉典型数据并行问题的实现方式。
+    \item 通过调整线程数量和问题规模，分析程序的时间性能、加速比与可扩展性特征。
+\end{enumerate}
+
+\section{实验原理}
+\subsection{Pthreads 并行模型}
+Pthreads 提供基于共享内存的线程接口。主线程负责：
+\begin{enumerate}
+    \item 生成输入数据；
+    \item 划分任务并创建工作线程；
+    \item 等待线程结束并汇总结果。
+\end{enumerate}
+
+在线程划分上，本实验采用静态划分策略：
+\begin{itemize}
+    \item 矩阵乘法按行划分输出矩阵 $C$ 的行区间；
+    \item 数组求和按下标区间划分，每个线程计算局部和，再由主线程归并。
+\end{itemize}
+
+\subsection{并行矩阵乘法原理}
+给定 $A\in\mathbb{R}^{m\times n}$ 与 $B\in\mathbb{R}^{n\times k}$，
+\[
+C_{ij}=\sum_{p=1}^{n}A_{ip}B_{pj}.
+\]
+
+若将 $C$ 的行集合划分给不同线程，则各线程写入不重叠行，不需要加锁。设总线程数为 $T$，第 $t$ 个线程处理区间 $[r_t, r_{t+1})$。
+
+矩阵乘法理论浮点运算量近似为
+\[
+\text{FLOPs} \approx 2mnk,
+\]
+对应性能指标
+\[
+\text{GFLOPS}=\frac{2mnk}{t\times 10^9},
+\]
+其中 $t$ 为运行时间（秒）。
+
+\subsection{并行数组求和原理}
+对长度为 $n$ 的整数数组 $A$，目标为
+\[
+S=\sum_{i=1}^{n}A_i.
+\]
+
+将数组分成 $T$ 段，每个线程计算局部和 $S_t$，最终
+\[
+S=\sum_{t=1}^{T}S_t.
+\]
+
+本实现采用每线程私有累加变量，避免写冲突。额外使用串行累加进行正确性校验。
+
+\section{实验内容}
+\subsection{程序实现}
+实验代码位于 \texttt{lab/03/src}，主要包含：
+\begin{enumerate}
+    \item \texttt{matmul\_pthreads.cpp}：并行矩阵乘法程序；
+    \item \texttt{array\_sum\_pthreads.cpp}：并行数组求和程序。
+\end{enumerate}
+
+构建系统使用 CMake，主配置文件为 \texttt{lab/03/CMakeLists.txt}，编译生成两个可执行文件：
+\begin{itemize}
+    \item \texttt{matmul\_pthreads}
+    \item \texttt{array\_sum\_pthreads}
+\end{itemize}
+
+\subsection{实验步骤}
+\begin{enumerate}
+    \item 构建程序：
+\begin{verbatim}
+cd lab/03
+cmake -S . -B build
+cmake --build build -j
+\end{verbatim}
+
+    \item 单次功能验证：
+\begin{verbatim}
+./build/matmul_pthreads 128 128 128 4 --verify
+./build/array_sum_pthreads 1048576 4 --verify
+\end{verbatim}
+
+    \item 基准测试（脚本）：
+\begin{verbatim}
+python3 benchmark.py --skip-build \
+  --matmul-sizes 128,256 \
+  --sum-sizes 1048576,4194304 \
+  --threads 1,2,4
+\end{verbatim}
+\end{enumerate}
+
+\section{实验结果}
+\subsection{并行矩阵乘法结果}
+\begin{table}[h]
+\centering
+\caption{矩阵乘法性能结果（m=n=k=128）}
+\begin{tabular}{ccc}
+\toprule
+线程数 & 时间（s） & GFLOPS \\
+\midrule
+1 & 0.000552 & 7.594 \\
+2 & 0.000318 & 13.189 \\
+4 & 0.000317 & 13.242 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\centering
+\caption{矩阵乘法性能结果（m=n=k=256）}
+\begin{tabular}{ccc}
+\toprule
+线程数 & 时间（s） & GFLOPS \\
+\midrule
+1 & 0.002392 & 14.028 \\
+2 & 0.001373 & 24.431 \\
+4 & 0.000934 & 35.929 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+从结果可以看出，随着线程数从 1 增加到 4，矩阵乘法的吞吐能力明显提升。对于较大规模（256）时，加速效果更稳定，说明并行计算在计算密集型任务上的收益更明显。
+
+\subsection{并行数组求和结果}
+\begin{table}[h]
+\centering
+\caption{数组求和性能结果（n=1,048,576）}
+\begin{tabular}{cccc}
+\toprule
+线程数 & 时间（s） & Throughput（Melems/s） & Sum \\
+\midrule
+1 & 0.000295 & 3553.062 & 1184937 \\
+2 & 0.000221 & 4740.977 & 1184937 \\
+4 & 0.000426 & 2463.071 & 1184937 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\centering
+\caption{数组求和性能结果（n=4,194,304）}
+\begin{tabular}{cccc}
+\toprule
+线程数 & 时间（s） & Throughput（Melems/s） & Sum \\
+\midrule
+1 & 0.001221 & 3433.952 & 819268 \\
+2 & 0.000752 & 5577.332 & 819268 \\
+4 & 0.000584 & 7183.110 & 819268 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+数组求和在较小规模下会受到线程创建、调度与内存访问开销影响，因此不一定随线程数单调提升；在较大规模下，4 线程吞吐率明显优于单线程，体现出更好的并行收益。
+
+\subsection{结果分析与结论}
+\begin{enumerate}
+    \item Pthreads 能有效提升计算密集型任务（如矩阵乘法）性能；问题规模越大，并行收益越明显。
+    \item 对内存访问主导型任务（如数组求和），性能受内存带宽和线程管理开销影响较大。
+    \item 实验验证了并行程序的常见规律：线程数增加会先带来加速，之后可能因资源竞争出现收益递减。
+\end{enumerate}
+
+\end{document}
