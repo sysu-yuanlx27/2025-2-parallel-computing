@@ -1,0 +1,236 @@
+\documentclass[12pt,a4paper]{ctexart}
+
+\usepackage[a4paper,margin=2.5cm]{geometry}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{listings}
+\usepackage[dvipsnames]{xcolor}
+\usepackage{hyperref}
+
+\definecolor{codebg}{HTML}{F7F8FA}
+\definecolor{codeframe}{HTML}{D9DEE7}
+\definecolor{codekeyword}{HTML}{0066CC}
+\definecolor{codestring}{HTML}{A31515}
+\definecolor{codecomment}{HTML}{008000}
+
+\lstdefinestyle{reportcode}{
+  backgroundcolor=\color{codebg},
+  basicstyle=\ttfamily\small,
+  frame=single,
+  rulecolor=\color{codeframe},
+  columns=fullflexible,
+  breaklines=true,
+  breakatwhitespace=true,
+  tabsize=4,
+  showstringspaces=false,
+  keepspaces=true,
+  keywordstyle=\color{codekeyword}\bfseries,
+  commentstyle=\color{codecomment},
+  stringstyle=\color{codestring},
+  numbers=left,
+  numberstyle=\tiny\color{gray},
+  numbersep=8pt,
+  xleftmargin=1.8em,
+  framexleftmargin=1.2em
+}
+
+\lstset{style=reportcode}
+\hypersetup{
+  colorlinks=true,
+  linkcolor=MidnightBlue,
+  urlcolor=RoyalBlue,
+  citecolor=MidnightBlue
+}
+
+\title{并行程序设计与算法实验五报告\\基于 OpenMP 与 Pthreads 的并行矩阵乘法}
+\author{姓名：元朗曦\quad 学号：23336294}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\section{实验目的}
+本实验围绕矩阵乘法这一典型计算密集型问题，分别使用 OpenMP 与 Pthreads 进行并行实现，并分析线程数量、矩阵规模和调度策略对程序性能的影响。实验目的如下：
+\begin{enumerate}[itemsep=0.3em]
+  \item 掌握 OpenMP 并行循环的基本使用方法，理解 \texttt{parallel for} 与 \texttt{schedule} 子句的作用。
+  \item 实现基于 Pthreads 的 \texttt{parallel\_for} 抽象，模拟 OpenMP 对并行循环的分解、分配与执行机制。
+  \item 使用矩阵乘法验证并行程序的正确性，掌握通过串行程序进行结果校验的方法。
+  \item 通过实验数据比较不同线程数、不同调度策略下的运行时间和 GFLOPS，分析并行加速效果。
+\end{enumerate}
+
+\section{实验原理}
+
+\subsection*{矩阵乘法}
+设矩阵 $A\in\mathbb{R}^{m\times n}$，矩阵 $B\in\mathbb{R}^{n\times k}$，矩阵乘法结果为 $C\in\mathbb{R}^{m\times k}$，则：
+\[
+C_{ij}=\sum_{p=0}^{n-1}A_{ip}B_{pj}.
+\]
+
+矩阵 $C$ 的每一行可以独立计算，因此可以将外层行循环分配给多个线程。不同线程写入 $C$ 的不同行，不存在写冲突，不需要加锁。
+
+矩阵乘法的浮点运算量近似为：
+\[
+\text{FLOPs}=2mnk,
+\]
+其中一次乘法和一次加法合计为 2 次浮点运算。程序性能使用 GFLOPS 衡量：
+\[
+\text{GFLOPS}=\frac{2mnk}{t\times 10^9},
+\]
+其中 $t$ 为运行时间，单位为秒。
+
+\subsection*{OpenMP 并行循环}
+OpenMP 是共享内存并行编程接口，使用编译指导语句描述并行区域。在本实验中，OpenMP 版本使用：
+\begin{lstlisting}[language=C++]
+#pragma omp parallel for schedule(static)
+for (int i = 0; i < m; ++i) {
+    // compute row i of C
+}
+\end{lstlisting}
+
+调度策略包括：
+\begin{itemize}[itemsep=0.2em]
+  \item \textbf{默认调度}：由 OpenMP 运行时和编译器决定循环分配方式。
+  \item \textbf{静态调度}：在循环开始前将迭代均匀划分给各线程，调度开销小。
+  \item \textbf{动态调度}：运行时动态分配迭代，负载均衡能力更强，但同步开销更高。
+\end{itemize}
+
+\subsection*{Pthreads parallel\_for}
+Pthreads 是较底层的线程库，需要显式创建、传参和回收线程。为了模拟 OpenMP 的并行循环，本实验实现了如下形式的 \texttt{parallel\_for}：
+\begin{lstlisting}[language=C++]
+int parallel_for(int start, int end, int inc,
+                 void* (*functor)(int, void*),
+                 void* arg,
+                 int num_threads,
+                 Schedule schedule);
+\end{lstlisting}
+
+其中 \texttt{start}、\texttt{end} 和 \texttt{inc} 描述循环范围，\texttt{functor} 表示每次迭代执行的函数，\texttt{arg} 传递共享参数，\texttt{num\_threads} 表示期望线程数。静态调度将迭代区间平均分配给各线程；动态调度使用原子计数器为线程分配下一次迭代。
+
+\section{实验内容}
+
+本实验代码位于 \texttt{lab/05/src}，使用 CMake 作为构建工具。主要程序如下：
+\begin{enumerate}[itemsep=0.3em]
+  \item \texttt{openmp\_matmul.cpp}：基于 OpenMP 的并行矩阵乘法。
+  \item \texttt{pthread\_parallel\_for\_matmul.cpp}：基于 Pthreads 的 \texttt{parallel\_for}，并以矩阵乘法作为测试样例。
+  \item \texttt{benchmark.py}：随机生成矩阵规模并批量运行不同实现，用于性能测试。
+\end{enumerate}
+
+\subsection*{OpenMP 程序设计}
+OpenMP 程序从命令行读取矩阵规模、线程数和调度策略，随机生成矩阵 $A$ 和 $B$，并计算矩阵 $C$。程序支持如下参数：
+\begin{lstlisting}[language=bash]
+./openmp_matmul <m> <n> <k> <threads> [default|static|dynamic] [--verify] [--print]
+\end{lstlisting}
+
+其中矩阵规模 $m,n,k$ 的范围为 $[128,2048]$，线程数量范围为 $[1,16]$。\texttt{--verify} 选项会执行串行矩阵乘法并比较最大绝对误差；\texttt{--print} 选项用于输出矩阵 $A$、$B$、$C$。
+
+\subsection*{Pthreads 程序设计}
+Pthreads 程序首先实现通用的 \texttt{parallel\_for}。
+随后将矩阵乘法的行计算封装为 \texttt{functor}：
+\begin{lstlisting}[language=C++]
+void* matmul_row_functor(int row, void* raw_args) {
+    // compute one row of C
+    return nullptr;
+}
+
+parallel_for(0, m, 1, matmul_row_functor, &args, threads, schedule);
+\end{lstlisting}
+
+该设计将循环调度逻辑与具体计算逻辑分离，使 \texttt{parallel\_for} 可以复用于其他按循环迭代划分的任务。
+
+\subsection*{Benchmark 流程}
+实验 benchmark 按如下流程执行：
+\begin{enumerate}[itemsep=0.3em]
+  \item 在 $[128,2048]$ 范围内随机生成整数 $m,n,k$；
+  \item 程序根据 $m,n,k$ 随机生成矩阵 $A\in\mathbb{R}^{m\times n}$ 和 $B\in\mathbb{R}^{n\times k}$；
+  \item 调用并行矩阵乘法计算 $C=A\times B$；
+  \item 记录运行时间和 GFLOPS；
+  \item 重复选取不同随机规模，分析矩阵规模变化对性能的影响。
+\end{enumerate}
+
+benchmark 脚本支持选择实现、调度策略、样本数量和线程数。例如：
+\begin{lstlisting}[language=bash]
+python3 lab/05/benchmark.py \
+  --samples 4 \
+  --program both \
+  --schedules static \
+  --threads 4 \
+  --csv report/random_benchmark.csv
+\end{lstlisting}
+
+\subsection*{构建与运行}
+构建命令如下：
+\begin{lstlisting}[language=bash]
+cmake -S lab/05 -B lab/05/build -DCMAKE_BUILD_TYPE=Release
+cmake --build lab/05/build -j
+\end{lstlisting}
+
+单次运行示例：
+\begin{lstlisting}[language=bash]
+./lab/05/build/openmp_matmul 512 512 512 4 static --verify
+./lab/05/build/pthread_parallel_for_matmul 512 512 512 4 static --verify
+\end{lstlisting}
+
+\section{实验结果}
+
+\subsection*{正确性验证}
+OpenMP 与 Pthreads 两个程序均通过串行矩阵乘法校验。以 $128\times128\times128$ 矩阵为例：
+\begin{lstlisting}
+Task: OpenMP matrix multiplication
+A: 128 x 128
+B: 128 x 128
+C: 128 x 128
+Threads: 4
+Schedule: dynamic
+Time (sec): 0.000432
+GFLOPS: 9.699
+Verify: PASS, max_abs_diff=0.0000000000
+
+Task: Pthreads parallel_for matrix multiplication
+A: 128 x 128
+B: 128 x 128
+C: 128 x 128
+Requested threads: 4
+Actual threads: 4
+Schedule: dynamic
+Time (sec): 0.000618
+GFLOPS: 6.791
+Verify: PASS, max_abs_diff=0.0000000000
+\end{lstlisting}
+
+\subsection*{随机规模 benchmark}
+本节按照 benchmark 流程随机生成多组 $m,n,k$。每组样本中，程序都会随机生成 $A$ 和 $B$，再计算 $C=A\times B$。测试线程数为 4，调度方式为 static。
+
+\begin{table}[h]
+\centering
+\caption{随机矩阵规模 benchmark 结果}
+\begin{tabular}{ccccccc}
+\toprule
+样本 & 实现 & $m$ & $n$ & $k$ & 时间（s） & GFLOPS \\
+\midrule
+1 & OpenMP & 458 & 179 & 1371 & 0.004380 & 51.325 \\
+1 & Pthreads & 458 & 179 & 1371 & 0.004517 & 49.772 \\
+2 & OpenMP & 1125 & 596 & 1402 & 0.035874 & 52.409 \\
+2 & Pthreads & 1125 & 596 & 1402 & 0.034081 & 55.166 \\
+3 & OpenMP & 1145 & 1441 & 1063 & 0.068255 & 51.393 \\
+3 & Pthreads & 1145 & 1441 & 1063 & 0.068131 & 51.486 \\
+4 & OpenMP & 359 & 197 & 420 & 0.001364 & 43.565 \\
+4 & Pthreads & 359 & 197 & 420 & 0.001233 & 48.185 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+从结果可以看出，随机规模下两个实现均能保持较稳定的吞吐率。较小样本（如样本 4）的 GFLOPS 低于大样本，主要原因是线程创建、调度和计时开销在小规模计算中占比更高；较大样本中计算量更充分，并行开销被摊薄，因此 GFLOPS 更稳定。OpenMP 与 Pthreads 在同一随机规模下的结果接近，说明手动实现的 \texttt{parallel\_for} 能正确完成循环分解与线程执行。
+
+\subsection*{实验结论}
+\begin{enumerate}[itemsep=0.3em]
+  \item OpenMP 能以较少代码实现并行矩阵乘法，适合规则循环的快速并行化。
+  \item 对矩阵乘法这类每次迭代工作量接近的任务，静态调度通常具有较低开销和较好性能。
+  \item Pthreads 可以构造类似 OpenMP 的 \texttt{parallel\_for} 抽象，但需要显式处理线程创建、任务划分和同步。
+  \item 随着线程数增加，程序总体性能提升明显，但实际加速比会受到线程管理开销、缓存行为和硬件核心数限制。
+\end{enumerate}
+
+\end{document}
