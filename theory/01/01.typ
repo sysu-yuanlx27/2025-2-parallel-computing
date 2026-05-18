@@ -1,17 +1,17 @@
-#import "@local/sysu-exercise:0.1.0": *
-#import "@preview/zebraw:0.6.1": *
+#import "@local/sysu-assignment:0.1.0": *
+// #import "@preview/zebraw:0.6.1": *
 
-#show: exercise.with(
+#show: assignment.with(
   title: "第一次作业",
   subtitle: "并行程序设计与算法（理论）",
   student: (name: "元朗曦", id: "23336294"),
   lang: "zh",
 )
 
-#show: zebraw.with(
-  background-color: luma(95%),
-  lang: false,
-)
+// #show: zebraw.with(
+//   background-color: luma(95%),
+//   lang: false,
+// )
 
 #problem[
   + 结合存储组织方式，说明 *distributed-memory system* 与 *shared-memory system* 的区别，并解释为什么在 distributed-memory system 中，处理器之间不能像 shared-memory system 那样直接访问同一块主存数据。
